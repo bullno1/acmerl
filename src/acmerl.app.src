@@ -1,0 +1,17 @@
+{application, acmerl,
+ [{description, "ACME client for Erlang"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {applications,
+   [ kernel
+   , stdlib
+   , public_key
+   , base64url
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {maintainers, []},
+  {licenses, ["MIT"]},
+  {links, []}
+ ]}.
