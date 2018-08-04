@@ -11,7 +11,9 @@ all() -> [ new_client
          ].
 
 groups() ->
-    [ {with_client, [shuffle], [create_account_from_new_key]}
+    [ {with_client, [shuffle], [ create_account_from_new_key
+                               , create_account_from_existing_key
+                               ]}
     ].
 
 init_per_suite(Config) ->
@@ -43,6 +45,21 @@ create_account_from_new_key(Config) ->
         ?assertMatch(
            {ok, _},
            acmerl:new_account(Client, #{<<"termsOfServiceAgreed">> => true}, {new_key, Algo})
+        )
+      end,
+      ['RS256', 'ES256', 'ES384']
+    ),
+    ok.
+
+create_account_from_existing_key(Config) ->
+    Client = proplists:get_value(client, Config),
+    lists:foreach(
+      fun(Algo) ->
+        ct:pal("Algo = ~p", [Algo]),
+        Key = acmerl_jose:generate_key(Algo),
+        ?assertMatch(
+           {ok, _},
+           acmerl:new_account(Client, #{<<"termsOfServiceAgreed">> => true}, {key, Key})
         )
       end,
       ['RS256', 'ES256', 'ES384']
