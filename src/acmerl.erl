@@ -80,7 +80,10 @@ new_account(
   AccountOpts, AccountKeyOpts
  ) ->
     AccountKey = create_account_key(AccountKeyOpts),
-    ExtraHeaders = #{ <<"jwk">> => acmerl_jose:public_jwk(AccountKey) },
+    Jwk = acmerl_jose:export_key(AccountKey, #{ with_private => false
+                                              , with_algo => false
+                                              }),
+    ExtraHeaders = #{ <<"jwk">> =>  Jwk},
     case post(Client, NewAccountUrl, AccountOpts, AccountKey, ExtraHeaders) of
         {ok, Headers, Response} ->
             {ok, #account{ url = proplists:get_value(<<"location">>, Headers)
