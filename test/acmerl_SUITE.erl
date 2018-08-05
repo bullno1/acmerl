@@ -17,6 +17,7 @@ groups() ->
                                , create_account_from_existing_key
                                ]}
     , {with_account, [shuffle], [ create_order
+                                , import_export_account
                                 ]}
     ].
 
@@ -105,6 +106,22 @@ create_order(Config) ->
     {ok, Order} = acmerl:new_order(Client, Account, OrderOpts),
     {ok, Authorizations} = acmerl:order_authorizations(Client, Order),
     ?assertEqual(length(Identifiers), length(Authorizations)),
+
+    ok.
+
+import_export_account(Config) ->
+    Client = proplists:get_value(client, Config),
+    Account = proplists:get_value(account, Config),
+
+    ExportedAccount = jsx:encode(acmerl:export_account(Account)),
+    {ok, ImportedAccount} = acmerl:import_account(jsx:decode(ExportedAccount, [return_maps])),
+
+    Identifiers = [ #{ <<"type">> => <<"dns">>
+                     , <<"value">> => <<"example.com">>
+                     }
+                  ],
+    OrderOpts = #{<<"identifiers">> => Identifiers},
+    {ok, _Order} = acmerl:new_order(Client, ImportedAccount, OrderOpts),
 
     ok.
 

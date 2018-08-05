@@ -2,6 +2,7 @@
 -export([ new_client/2
         , new_account/2, new_account/3
         , account_info/1, account_key/1
+        , import_account/1, export_account/1
         , new_order/3
         , order_authorizations/2
         ]).
@@ -21,7 +22,7 @@
                 }).
 -record(account, { url :: binary()
                  , key :: acmerl_jose:key()
-                 , info :: acmerl_json:json_term()
+                 , info = #{} :: acmerl_json:json_term()
                  }).
 
 -opaque client() :: #client{}.
@@ -78,6 +79,27 @@ account_info(#account{info = Info}) -> Info.
 
 -spec account_key(account()) -> acmerl_jose:key().
 account_key(#account{key = Key}) -> Key.
+
+-spec export_account(account()) -> acmerl_json:json_term().
+export_account(#account{ url = AccountUrl
+                       , key = AccountKey
+                       }) ->
+    Jwk = acmerl_jose:export_key(AccountKey, #{ with_private => true
+                                              , with_algo => true
+                                              }),
+    Jwk#{<<"kid">> => AccountUrl}.
+
+-spec import_account(acmerl_json:json_term()) -> maybe(account()).
+import_account(#{<<"kid">> := AccountUrl} = Key) when is_binary(AccountUrl) ->
+    case acmerl_jose:import_key(Key) of
+        {ok, Jwk} ->
+            Account = #account{ url = AccountUrl, key = Jwk },
+            {ok, Account};
+        {error, _} = Err ->
+            Err
+    end;
+import_account(_) ->
+    {error, malformed}.
 
 -spec new_order(client(), account(), acmerl_json:json_term()) ->
     maybe(acmerl_json:json_term()).
