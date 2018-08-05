@@ -30,31 +30,32 @@
 -spec generate_key(algo_name()) -> key().
 generate_key(AlgoName) -> generate_key1(algo_from_name(AlgoName)).
 
--spec sign(Payload, Key, ExtraHeaders, JsonEncoder) -> Signature when
+-spec sign(Payload, Key, ExtraHeaders, JsonCodec) -> Signature when
       Payload :: binary(),
       Key :: key(),
-      ExtraHeaders :: #{binary() => acmerl:json_term()},
-      JsonEncoder :: acmerl:json_encoder(),
+      ExtraHeaders :: #{binary() => acmerl_json:json_term()},
+      JsonCodec :: acmerl_json:codec(),
       Signature :: binary().
-sign(Payload, #key{algo = Algo, key = PrivKey}, ExtraHeaders, JsonEncoder) ->
+sign(Payload, #key{algo = Algo, key = PrivKey}, ExtraHeaders, JsonCodec) ->
     AlgoName = atom_to_binary(algo_name(Algo), latin1),
     Headers = ExtraHeaders#{<<"alg">> => AlgoName},
-    HeaderB64 = base64url:encode(JsonEncoder(Headers)),
+    HeaderB64 = base64url:encode(acmerl_json:encode(Headers, JsonCodec)),
     PayloadB64 = base64url:encode(Payload),
     Message = <<HeaderB64/binary, $., PayloadB64/binary>>,
     RawSig = public_key:sign(Message, digest_type(Algo), PrivKey),
     NormalizedSig = normalize_signature(Algo, RawSig),
     SigB64 = base64url:encode(NormalizedSig),
-    JsonEncoder(#{ <<"protected">> => HeaderB64
-                 , <<"payload">> => PayloadB64
-                 , <<"signature">> => SigB64
-                 }).
+    Bundle = #{ <<"protected">> => HeaderB64
+              , <<"payload">> => PayloadB64
+              , <<"signature">> => SigB64
+              },
+    acmerl_json:encode(Bundle, JsonCodec).
 
--spec export_key(key(), key_export_opts()) -> acmerl:json_term().
+-spec export_key(key(), key_export_opts()) -> acmerl_json:json_term().
 export_key(Key, Opts) ->
     export_key1(Key, normalize_key_export_opts(Opts)).
 
--spec import_key(acmerl:json_term()) -> {ok, key()} | {error, term()}.
+-spec import_key(acmerl_json:json_term()) -> {ok, key()} | {error, term()}.
 import_key(#{ <<"alg">> := AlgoName } = Key) ->
     try algo_from_name(AlgoName) of
         Algo -> import_key1(Algo, Key)

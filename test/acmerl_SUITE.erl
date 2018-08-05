@@ -144,31 +144,9 @@ create_account(Config) ->
     [{account, Account} | Config].
 
 client_opts() ->
-    #{ http_client => fun http_client/4
-     , json_encoder => fun jsx:encode/1
-     , json_decoder => fun(Bin) -> jsx:decode(Bin, [return_maps]) end
+    #{ http_module => acmerl_http_hackney
+     , json_module => acmerl_json_jsx
      }.
-
-http_client(Method, Url, Headers, Body) ->
-    case hackney:request(hackney_method(Method), Url, Headers, Body) of
-        {ok, Status, RespHeaders} ->
-            {ok, Status, normalize_headers(RespHeaders), <<>>};
-        {ok, Status, RespHeaders, ClientRef} ->
-            case hackney:body(ClientRef) of
-                {ok, RespBody} ->
-                    {ok, Status, normalize_headers(RespHeaders), RespBody};
-                {error, _} = Err ->
-                    Err
-            end;
-        {error, _} = Err ->
-            Err
-    end.
-
-hackney_method(Method) ->
-    binary_to_existing_atom(string:lowercase(atom_to_binary(Method, utf8)), utf8).
-
-normalize_headers(Headers) ->
-    [{string:lowercase(Key), Value} || {Key, Value} <- Headers].
 
 % From: `rebar3 as test shell`
 % Execute: `acmerl_SUITE:gen_keys().` to generate test keys

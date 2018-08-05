@@ -17,7 +17,7 @@ import_export(_) ->
         Key = acmerl_jose:generate_key(Algo),
         Message = crypto:strong_rand_bytes(16),
 
-        acmerl_jose:sign(Message, Key, #{}, fun jsx:encode/1),
+        acmerl_jose:sign(Message, Key, #{}, acmerl_json_jsx:new()),
 
         ExportedKey = acmerl_jose:export_key(Key, #{}),
         ?assertEqual({error, malformed}, acmerl_jose:import_key(ExportedKey)),
@@ -30,7 +30,7 @@ import_export(_) ->
         ?assertEqual(FullExportedKey, FullExportedKey2),
 
         {ok, ImportedKey} = acmerl_jose:import_key(FullExportedKey),
-        acmerl_jose:sign(Message, ImportedKey, #{}, fun jsx:encode/1),
+        acmerl_jose:sign(Message, ImportedKey, #{}, acmerl_json_jsx:new()),
 
         ?assertEqual(Key, ImportedKey)
       end,
@@ -57,7 +57,7 @@ import_examples(Config) ->
         {ok, JWK} = file:read_file(FullPath),
         {ok, Key} = acmerl_jose:import_key(jsx:decode(JWK, [return_maps])),
 
-        acmerl_jose:sign(Message, Key, #{}, fun jsx:encode/1)
+        acmerl_jose:sign(Message, Key, #{}, acmerl_json_jsx:new())
       end,
       KeyFiles
      ),
