@@ -2,12 +2,14 @@
 -export([ generate_key/1
         , sign/4
         , export_key/2
+        , import_key/1
         ]).
 -export_type([algo_name/0, key/0, key_export_opts/0]).
 -include_lib("public_key/include/public_key.hrl").
 
 -define(RSA_KEY_SIZE, 2048).
 -define(RSA_PUBLIC_EXPONENT, 65537).
+-define(EC_PUBLIC_MAGIC, 4).
 
 -type algo_name() :: 'RS256' | 'RS384' | 'RS512'
                    | 'ES256' | 'ES384' | 'ES512'.
@@ -35,7 +37,8 @@ generate_key(AlgoName) -> generate_key1(algo_from_name(AlgoName)).
       JsonEncoder :: acmerl:json_encoder(),
       Signature :: binary().
 sign(Payload, #key{algo = Algo, key = PrivKey}, ExtraHeaders, JsonEncoder) ->
-    Headers = ExtraHeaders#{<<"alg">> => algo_name(Algo)},
+    AlgoName = atom_to_binary(algo_name(Algo), latin1),
+    Headers = ExtraHeaders#{<<"alg">> => AlgoName},
     HeaderB64 = base64url:encode(JsonEncoder(Headers)),
     PayloadB64 = base64url:encode(Payload),
     Message = <<HeaderB64/binary, $., PayloadB64/binary>>,
@@ -50,6 +53,16 @@ sign(Payload, #key{algo = Algo, key = PrivKey}, ExtraHeaders, JsonEncoder) ->
 -spec export_key(key(), key_export_opts()) -> acmerl:json_term().
 export_key(Key, Opts) ->
     export_key1(Key, normalize_key_export_opts(Opts)).
+
+-spec import_key(acmerl:json_term()) -> {ok, key()} | {error, term()}.
+import_key(#{ <<"alg">> := AlgoName } = Key) ->
+    try algo_from_name(AlgoName) of
+        Algo -> import_key1(Algo, Key)
+    catch
+        error:badarg -> {error, {unsupported, <<"alg">>}}
+    end;
+import_key(_) ->
+    {error, malformed}.
 
 % Private
 
@@ -113,7 +126,10 @@ normalize_key_export_opts(Opts) ->
     maps:merge(Defaults, Opts).
 
 jwk(
-  #'RSAPrivateKey'{modulus = N, publicExponent = E},
+  #'RSAPrivateKey'{ version = 'two-prime'
+                  , modulus = N
+                  , publicExponent = E
+                  },
   #{with_private := false}
  ) ->
     #{ <<"kty">> => <<"RSA">>
@@ -121,7 +137,8 @@ jwk(
      , <<"e">> => encode_rsa_param(E)
      };
 jwk(
-  #'ECPrivateKey'{ publicKey = PublicKey
+  #'ECPrivateKey'{ version = 1
+                 , publicKey = PublicKey
                  , parameters = {namedCurve, CurveParams}
                  },
   #{with_private := false}
@@ -133,7 +150,8 @@ jwk(
      , <<"y">> => base64url:encode(Y)
      };
 jwk(
-  #'RSAPrivateKey'{ privateExponent = D
+  #'RSAPrivateKey'{ version = 'two-prime'
+                  , privateExponent = D
                   , prime1 = P
                   , prime2 = Q
                   , exponent1 = DP
@@ -153,7 +171,8 @@ jwk(
                },
     maps:merge(Public, Private);
 jwk(
-  #'ECPrivateKey'{ privateKey = PrivateKey
+  #'ECPrivateKey'{ version = 1
+                 , privateKey = PrivateKey
                  } = Key,
   #{with_private := true}
  ) ->
@@ -162,15 +181,84 @@ jwk(
     maps:merge(Public, Private).
 
 maybe_add_algo(BaseKey, Algo, #{with_algo := true}) ->
-    BaseKey#{<<"alg">> => algo_name(Algo)};
+    AlgoName = atom_to_binary(algo_name(Algo), latin1),
+    BaseKey#{<<"alg">> => AlgoName};
 maybe_add_algo(BaseKey, _Algo, #{with_algo := false}) ->
     BaseKey.
 
-encode_rsa_param(X) -> base64url:encode(int_to_bin(X, ?RSA_KEY_SIZE)).
+encode_rsa_param(X) -> base64url:encode(binary:encode_unsigned(X)).
 
 int_to_bin(Int, Width) -> <<Int:Width>>.
 
-ec_x_y(<<_:8, XY/binary>>) ->
+ec_x_y(<<?EC_PUBLIC_MAGIC, XY/binary>>) ->
     CoordSize = byte_size(XY) div 2,
     <<X:CoordSize/binary, Y:CoordSize/binary>> = XY,
     {X, Y}.
+
+import_key1(Algo, #{<<"kty">> := <<"RSA">>} = Key) ->
+    import_rsa(Algo, Key);
+import_key1(Algo, #{<<"kty">> := <<"EC">>} = Key) ->
+    import_ec(Algo, Key);
+import_key1(_, #{<<"kty">> := _}) ->
+    {error, {unsupported, <<"kty">>}};
+import_key1(_, _) ->
+    {error, malformed}.
+
+import_rsa(_, #{ <<"oth">> := _ }) ->
+    {error, {unsupported, <<"oth">>}};
+import_rsa(Algo, #{ <<"n">> := N
+                  , <<"e">> := E
+                  , <<"d">> := D
+                  , <<"p">> := P
+                  , <<"q">> := Q
+                  , <<"dp">> := DP
+                  , <<"dq">> := DQ
+                  , <<"qi">> := QI
+                  }) ->
+    SigningKey = #'RSAPrivateKey'{ version = 'two-prime'
+                                 , modulus = decode_rsa_param(N)
+                                 , publicExponent = decode_rsa_param(E)
+                                 , privateExponent = decode_rsa_param(D)
+                                 , prime1 = decode_rsa_param(P)
+                                 , prime2 = decode_rsa_param(Q)
+                                 , exponent1 = decode_rsa_param(DP)
+                                 , exponent2 = decode_rsa_param(DQ)
+                                 , coefficient = decode_rsa_param(QI)
+                                 },
+    Key = #key{ algo = Algo, key = SigningKey },
+    {ok, Key};
+import_rsa(_, _) ->
+    {error, malformed}.
+
+decode_rsa_param(X) ->
+    binary:decode_unsigned(base64url:decode(X)).
+
+import_ec(Algo, #{<<"crv">> := CurveName} = Key) ->
+    try curve_from_name(CurveName) of
+        Curve -> import_ec1(Algo, Curve, Key)
+    catch
+        error:badarg -> {error, {unsupported, <<"crv">>}}
+    end.
+
+curve_from_name(<<"P-256">>) -> ?'secp256r1';
+curve_from_name(<<"P-384">>) -> ?'secp384r1';
+curve_from_name(<<"P-521">>) -> ?'secp521r1';
+curve_from_name(_) -> error(badarg).
+
+import_ec1(Algo, Curve, #{ <<"x">> := XB64
+                         , <<"y">> := YB64
+                         , <<"d">> := DB64
+                         }) ->
+    X = base64url:decode(XB64),
+    Y = base64url:decode(YB64),
+    PublicKey = <<?EC_PUBLIC_MAGIC, X/binary, Y/binary>>,
+    PrivateKey = base64url:decode(DB64),
+    SigningKey = #'ECPrivateKey'{ version = 1
+                                , privateKey = PrivateKey
+                                , parameters = {namedCurve, Curve}
+                                , publicKey = PublicKey
+                                },
+    Key = #key{ algo = Algo, key = SigningKey },
+    {ok, Key};
+import_ec1(_, _, _) ->
+    {error, malformed}.
