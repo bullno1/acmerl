@@ -4,7 +4,7 @@
 
 % Setup
 
-all() -> [import_export, import_examples].
+all() -> [import_export, import_examples, thumbprint].
 
 % Tests
 
@@ -61,4 +61,17 @@ import_examples(Config) ->
       end,
       KeyFiles
      ),
+    ok.
+
+thumbprint(Config) ->
+    % Key from: https://tools.ietf.org/html/rfc7638#section-3.1
+
+    DataDir = proplists:get_value(data_dir, Config),
+    FullPath = filename:join(DataDir, "rfc7638.section-3.1.json"),
+    {ok, FileContent} = file:read_file(FullPath),
+    Jwk = jsx:decode(FileContent, [return_maps]),
+
+    Thumbprint = acmerl_jose:thumbprint({jwk, Jwk}, acmerl_json_jsx:new()),
+    ?assertEqual(<<"NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs">>, Thumbprint),
+
     ok.

@@ -3,6 +3,7 @@
         , sign/4
         , export_key/2
         , import_key/1
+        , thumbprint/2
         ]).
 -export_type([algo_name/0, key/0, key_export_opts/0]).
 -include_lib("public_key/include/public_key.hrl").
@@ -64,6 +65,16 @@ import_key(#{ <<"alg">> := AlgoName } = Key) ->
     end;
 import_key(_) ->
     {error, malformed}.
+
+-spec thumbprint(Key, acmerl_json:codec()) -> binary() when
+      Key :: key()
+           | {jwk, acmerl_json:json_term()}.
+thumbprint(#key{} = Key, JsonCodec) ->
+    thumbprint(export_key(Key, #{}), JsonCodec);
+thumbprint({jwk, Jwk}, JsonCodec) ->
+    CanonKey = strip_jwk_for_thumbprint(Jwk),
+    Json = acmerl_json:encode(CanonKey, JsonCodec),
+    base64url:encode(crypto:hash(sha256, Json)).
 
 % Private
 
@@ -263,3 +274,8 @@ import_ec1(Algo, Curve, #{ <<"x">> := XB64
     {ok, Key};
 import_ec1(_, _, _) ->
     {error, malformed}.
+
+strip_jwk_for_thumbprint(#{<<"kty">> := <<"RSA">>} = Key) ->
+    maps:with([<<"kty">>, <<"n">>, <<"e">>], Key);
+strip_jwk_for_thumbprint(#{<<"kty">> := <<"EC">>} = Key) ->
+    maps:with([<<"kty">>, <<"crv">>, <<"x">>, <<"y">>], Key).
