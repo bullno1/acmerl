@@ -158,6 +158,8 @@ post1(
 request_json(Method, Url, Body, Opts) ->
     case request(Method, Url, Body, Opts) of
         {ok, Headers, {json, Resp}} -> {ok, Headers, Resp};
+        % Hack for empty body
+        {ok, Headers, {unknown, <<>>}} -> {ok, Headers, #{}};
         {ok, _, _} -> {error, invalid_response};
         {error, _} = Err -> Err
     end.

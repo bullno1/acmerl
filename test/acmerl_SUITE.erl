@@ -3,6 +3,7 @@
 -include_lib("stdlib/include/assert.hrl").
 
 -define(DIRECTORY_URL, <<"https://acme-staging-v02.api.letsencrypt.org/directory">>).
+-define(SUPPORTED_ALGOS, ['RS256', 'ES256', 'ES384']).
 
 % Setup
 
@@ -35,6 +36,16 @@ init_per_group(with_account, Config) ->
 
 end_per_group(_, _) -> ok.
 
+init_per_testcase(create_account_from_new_key, Config) ->
+    case os:getenv("ACMERL_TEST_ACC_FROM_NEW_KEY") of
+        false -> {skip, avoid_rate_limit};
+        _ -> Config
+    end;
+init_per_testcase(_, Config) ->
+    Config.
+
+end_per_testcase(_, _) -> ok.
+
 % Tests
 
 new_client(_Config) ->
@@ -51,23 +62,32 @@ create_account_from_new_key(Config) ->
            acmerl:new_account(Client, #{<<"termsOfServiceAgreed">> => true}, {new_key, Algo})
         )
       end,
-      ['RS256', 'ES256', 'ES384']
+      ?SUPPORTED_ALGOS
     ),
     ok.
 
 create_account_from_existing_key(Config) ->
     Client = proplists:get_value(client, Config),
+    DataDir = proplists:get_value(data_dir, Config),
+
     lists:foreach(
       fun(Algo) ->
-        ct:pal("Algo = ~p", [Algo]),
-        Key = acmerl_jose:generate_key(Algo),
+        ct:pal("Key = ~p", [Algo]),
+
+        KeyFileName = iolist_to_binary(io_lib:format("~s.json", [Algo])),
+        KeyFilePath = filename:join(DataDir, KeyFileName),
+        {ok, KeyFileContent} = file:read_file(KeyFilePath),
+        JWK = jsx:decode(KeyFileContent, [return_maps]),
+
+        {ok, Key} = acmerl_jose:import_key(JWK),
         ?assertMatch(
            {ok, _},
            acmerl:new_account(Client, #{<<"termsOfServiceAgreed">> => true}, {key, Key})
         )
       end,
-      ['RS256', 'ES256', 'ES384']
+      ?SUPPORTED_ALGOS
     ),
+
     ok.
 
 create_order(Config) ->
@@ -111,8 +131,16 @@ create_client(Config) ->
 
 create_account(Config) ->
     Client = proplists:get_value(client, Config),
+
+    DataDir = proplists:get_value(data_dir, Config),
+    KeyFilePath = filename:join(DataDir, "ES256.json"),
+    {ok, KeyFileContent} = file:read_file(KeyFilePath),
+    JWK = jsx:decode(KeyFileContent, [return_maps]),
+    {ok, Key} = acmerl_jose:import_key(JWK),
+
     AccountOpts = #{<<"termsOfServiceAgreed">> => true},
-    {ok, Account} = acmerl:new_account(Client, AccountOpts),
+
+    {ok, Account} = acmerl:new_account(Client, AccountOpts, {key, Key}),
     [{account, Account} | Config].
 
 client_opts() ->
@@ -141,3 +169,20 @@ hackney_method(Method) ->
 
 normalize_headers(Headers) ->
     [{string:lowercase(Key), Value} || {Key, Value} <- Headers].
+
+% From: `rebar3 as test shell`
+% Execute: `acmerl_SUITE:gen_keys().` to generate test keys
+
+gen_keys() ->
+    lists:foreach(
+      fun(Algo) ->
+        KeyFileName = iolist_to_binary(io_lib:format("~s.json", [Algo])),
+        KeyFilePath = filename:join("test/acmerl_SUITE_data", KeyFileName),
+        Key = acmerl_jose:generate_key(Algo),
+        JWK = jsx:encode(acmerl_jose:export_key(Key, #{ with_algo => true
+                                                      , with_private => true
+                                                      })),
+        ok = file:write_file(KeyFilePath, JWK)
+      end,
+      ?SUPPORTED_ALGOS
+     ).
