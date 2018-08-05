@@ -4,7 +4,7 @@
 
 % Setup
 
-all() -> [import_export].
+all() -> [import_export, import_examples].
 
 % Tests
 
@@ -35,5 +35,30 @@ import_export(_) ->
         ?assertEqual(Key, ImportedKey)
       end,
       Algos
+     ),
+    ok.
+
+import_examples(Config) ->
+    % Keys taken from:
+    %
+    % * https://tools.ietf.org/html/rfc7515#appendix-A.2
+    % * https://tools.ietf.org/html/rfc7515#appendix-A.4
+
+    KeyFiles = ["rfc7515.appendix-A.2.json", "rfc7515.appendix-A.4.json"],
+
+    DataDir = proplists:get_value(data_dir, Config),
+
+    lists:foreach(
+      fun(KeyFile) ->
+        Message = crypto:strong_rand_bytes(16),
+        FullPath = filename:join(DataDir, KeyFile),
+        ct:pal("Using key ~s", [FullPath]),
+
+        {ok, JWK} = file:read_file(FullPath),
+        {ok, Key} = acmerl_jose:import_key(jsx:decode(JWK, [return_maps])),
+
+        acmerl_jose:sign(Message, Key, #{}, fun jsx:encode/1)
+      end,
+      KeyFiles
      ),
     ok.
